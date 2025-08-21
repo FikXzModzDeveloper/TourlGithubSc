@@ -1,1 +1,133 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>GitHub CDN Uploader</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',sans-serif}
+body{min-height:100vh;background:#0a0a0a;display:flex;align-items:center;justify-content:center;color:#f1f1f1;padding:20px}
+.card{width:100%;max-width:360px;padding:30px;background:#ffffff08;border:1px solid #ffffff12;border-radius:18px;display:flex;flex-direction:column;gap:18px}
+h1{font-size:1.4rem;color:#00e5ff;text-align:center}
+label{display:block;text-align:center;padding:12px;border:2px dashed #00e5ff;border-radius:10px;cursor:pointer}
+button{width:100%;padding:12px;border:none;border-radius:10px;background:#00e5ff;color:#000;font-weight:700;cursor:pointer}
+button:disabled{opacity:.5}
+.progress{display:none}
+.progress-bar{height:4px;background:#ffffff15;border-radius:2px;overflow:hidden}
+.progress-fill{height:100%;background:#00e5ff;width:0}
+.result{display:none;word-break:break-all;font-size:.85rem}
+.copy-btn{margin-top:6px;padding:6px 14px;border:1px solid #00e5ff;background:transparent;color:#00e5ff;border-radius:6px;cursor:pointer}
+.stat{font-size:.8rem;text-align:center}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>GitHub CDN Uploader</h1>
+    <input id="fileInput" type="file" hidden/>
+    <label for="fileInput" id="fileLabel">📁 Pilih file</label>
 
+    <div class="progress" id="progress">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+
+    <button id="uploadBtn" disabled>Upload</button>
+
+    <div class="result" id="result">
+      <span id="resultText"></span><br/>
+      <a id="resultLink" target="_blank"></a><br/>
+      <button class="copy-btn" id="copyBtn">📋 Copy</button>
+    </div>
+
+    <div class="stat">Repo size: <span id="totalMB">...</span> MB</div>
+  </div>
+
+<script>
+const token  = (typeof import.meta !== 'undefined' ? import.meta.env.Token  : null)
+            || (typeof process !== 'undefined' ? process.env.Token  : null)
+            || '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';
+
+const repo   = (typeof import.meta !== 'undefined' ? import.meta.env.Repo   : null)
+            || (typeof process !== 'undefined' ? process.env.Repo   : null)
+            || 'FikXzModzDeveloper/Public';
+
+const branch = (typeof import.meta !== 'undefined' ? import.meta.env.Branch : null)
+            || (typeof process !== 'undefined' ? process.env.Branch : null)
+            || 'main';
+
+
+const fileInput  = document.getElementById('fileInput');
+const fileLabel  = document.getElementById('fileLabel');
+const uploadBtn  = document.getElementById('uploadBtn');
+const progress   = document.getElementById('progress');
+const progressFill = document.getElementById('progressFill');
+const result     = document.getElementById('result');
+const resultText = document.getElementById('resultText');
+const resultLink = document.getElementById('resultLink');
+const copyBtn    = document.getElementById('copyBtn');
+const totalMB    = document.getElementById('totalMB');
+
+/* hitung ukuran repo (real) */
+async function refreshTotal(){
+  try{
+    const res = await fetch(`https://api.github.com/repos/${repo}/git/trees/${branch}?recursive=1`,{
+      headers:{Authorization:`token ${token}`}
+    });
+    const data = await res.json();
+    let bytes = 0;
+    (data.tree || []).filter(i=>i.type==='blob').forEach(b=>bytes += b.size||0);
+    totalMB.textContent = (bytes/1024/1024).toFixed(2);
+  }catch{totalMB.textContent='error';}
+}
+refreshTotal();
+
+fileInput.addEventListener('change',()=>{
+  const f=fileInput.files[0];
+  fileLabel.textContent=f?f.name:'📁 Pilih file';
+  uploadBtn.disabled=!f;
+});
+
+uploadBtn.addEventListener('click',async()=>{
+  const file=fileInput.files[0];
+  if(!file)return;
+
+  uploadBtn.disabled=true;
+  progress.style.display='block';
+  result.style.display='none';
+  let pct=0;
+  const tick=setInterval(()=>{pct=Math.min(pct+10,95);progressFill.style.width=pct+'%';},100);
+
+  try{
+    const buffer=await file.arrayBuffer();
+    const base64=btoa(String.fromCharCode(...new Uint8Array(buffer)));
+    const ext=file.name.split('.').pop();
+    const filename=Math.random().toString(36).slice(2,6)+'.'+ext;
+
+    const res=await fetch(`https://api.github.com/repos/${repo}/contents/${filename}`,{
+      method:'PUT',
+      headers:{Authorization:`token ${token}`,'Content-Type':'application/json'},
+      body:JSON.stringify({message:`upload ${filename}`,content:base64,branch})
+    });
+    if(!res.ok){const err=await res.json();throw new Error(err.message||'unknown');}
+
+    clearInterval(tick);
+    progressFill.style.width='100%';
+    await refreshTotal();
+    const cdn=`https://cdn.jsdelivr.net/gh/${repo}@${branch}/${filename}`;
+    resultText.textContent='✅ Berhasil!';
+    resultLink.href=resultLink.textContent=cdn;
+    copyBtn.onclick=()=>navigator.clipboard.writeText(cdn);
+    progress.style.display='none';
+    result.style.display='block';
+    uploadBtn.disabled=false;
+
+  }catch(e){
+    clearInterval(tick);
+    progress.style.display='none';
+    resultText.textContent='❌ Gagal: '+e.message;
+    result.style.display='block';resultLink.style.display='none';copyBtn.style.display='none';
+    uploadBtn.disabled=false;
+  }
+});
+</script>
+</body>
+</html>
